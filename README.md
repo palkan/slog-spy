@@ -2,7 +2,7 @@
 
 Slog handler (or wrapper) to temporary deliver formatted verbose logs to an arbitrary target. Useful for providing diagnostic/troubleshooting logging functionality to your Go application.
 
-> ![NOTE]
+> [!NOTE]
 > This library has been extracted from [AnyCable](https://github.com/anycable/anycable-go).
 
 ## Install
