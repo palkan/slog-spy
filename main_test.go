@@ -14,20 +14,23 @@ import (
 //go:linkname IgnorePC log/slog/internal.IgnorePC
 var IgnorePC = true
 
-func BenchmarkTracer(b *testing.B) {
+func BenchmarkSpy(b *testing.B) {
 	handler := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})
 	spy := NewSpy(handler)
 	configs := []struct {
-		spy      *Spy
-		active   bool
-		ignorePC bool
+		spy          *Spy
+		active       bool
+		ignorePC     bool
+		handlerDebug bool
 	}{
-		{spy, true, false},
-		{spy, true, true},
-		{spy, false, false},
-		{spy, false, true},
-		{nil, false, false},
-		{nil, false, true},
+		{spy, true, false, false},
+		{spy, true, true, false},
+		{spy, false, false, false},
+		{spy, false, true, false},
+		{nil, false, false, false},
+		{nil, false, false, true},
+		{nil, false, true, false},
+		{nil, false, true, true},
 	}
 
 	for _, config := range configs {
@@ -40,8 +43,18 @@ func BenchmarkTracer(b *testing.B) {
 			}
 		}
 
-		desc := fmt.Sprintf("%s with ignorePC=%t", spyDesc, config.ignorePC)
+		desc := fmt.Sprintf("%s ignorePC=%t", spyDesc, config.ignorePC)
+
+		if config.handlerDebug {
+			desc += " mainLevel=debug"
+		}
+
 		b.Run(desc, func(b *testing.B) {
+			if config.handlerDebug {
+				handlerBuf := &bytes.Buffer{}
+				handler = slog.NewTextHandler(handlerBuf, &slog.HandlerOptions{Level: slog.LevelDebug})
+			}
+
 			var h slog.Handler = handler
 
 			IgnorePC = config.ignorePC
