@@ -17,7 +17,6 @@ var IgnorePC = true
 func BenchmarkTracer(b *testing.B) {
 	handler := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})
 	spy := NewSpy(handler)
-
 	configs := []struct {
 		spy      *Spy
 		active   bool

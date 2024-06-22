@@ -3,14 +3,15 @@ package main
 import (
 	"bytes"
 	"context"
+	"io"
 	"log/slog"
 	"sync/atomic"
 	"time"
 )
 
 const (
-	maxBufSize       = 256 * 1024 // 256KB
-	minFlushInterval = 250 * time.Millisecond
+	defaultMaxbufSize    = 256 * 1024 // 256KB
+	defaultFlushInterval = 250 * time.Millisecond
 )
 
 type SpyOutput func(msg []byte)
@@ -40,20 +41,53 @@ type SpyHandler struct {
 	buf    *bytes.Buffer
 
 	// A log handler we use to format records
-	printer slog.Handler
+	printer       slog.Handler
+	maxBufSize    int
+	flushInterval time.Duration
 }
 
 var _ slog.Handler = (*SpyHandler)(nil)
 
 type SpyHandlerOption func(*SpyHandler)
 
+// WithMaxBufSize sets the maximum output buffer size for the SpyHandler.
+func WithMaxBufSize(size int) SpyHandlerOption {
+	return func(h *SpyHandler) {
+		h.maxBufSize = size
+	}
+}
+
+// WithFlushInterval sets the max flush interval for the SpyHandler.
+func WithFlushInterval(interval time.Duration) SpyHandlerOption {
+	return func(h *SpyHandler) {
+		h.flushInterval = interval
+	}
+}
+
+// WithPrinter allows to configure a custom slog.Handler used to format log records.
+func WithPrinter(printerBuilder func(io io.Writer) slog.Handler) SpyHandlerOption {
+	return func(h *SpyHandler) {
+		h.printer = printerBuilder(h.buf)
+	}
+}
+
+// WithBacklogSize sets the size of the backlog channel used as a queue for log records.
+func WithBacklogSize(size int) SpyHandlerOption {
+	return func(h *SpyHandler) {
+		h.ch = make(chan *Entry, size)
+	}
+}
+
+// NewSpyHandler creates a new SpyHandler with the provided options.
 func NewSpyHandler(opts ...SpyHandlerOption) *SpyHandler {
 	buf := &bytes.Buffer{}
 	h := &SpyHandler{
-		ch:      make(chan *Entry, 2048),
-		buf:     buf,
-		active:  &atomic.Int64{},
-		printer: slog.NewJSONHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug}),
+		ch:            make(chan *Entry, 2048),
+		buf:           buf,
+		active:        &atomic.Int64{},
+		printer:       slog.NewJSONHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug}),
+		maxBufSize:    defaultMaxbufSize,
+		flushInterval: defaultFlushInterval,
 	}
 
 	for _, opt := range opts {
@@ -104,7 +138,7 @@ func (h *SpyHandler) Run(out SpyOutput) {
 
 		entry.printer.Handle(context.Background(), *entry.record) // nolint: errcheck
 
-		if h.buf.Len() > maxBufSize {
+		if h.buf.Len() > h.maxBufSize {
 			h.flush()
 		} else {
 			h.resetTimer()
@@ -127,10 +161,12 @@ func (h *SpyHandler) Unwatch() {
 // Clone returns a new SpyHandler with the same parent handler and buffers
 func (t *SpyHandler) Clone() *SpyHandler {
 	return &SpyHandler{
-		output: t.output,
-		active: t.active,
-		ch:     t.ch,
-		buf:    t.buf,
+		output:        t.output,
+		active:        t.active,
+		ch:            t.ch,
+		buf:           t.buf,
+		maxBufSize:    t.maxBufSize,
+		flushInterval: t.flushInterval,
 	}
 }
 
@@ -146,7 +182,7 @@ func (h *SpyHandler) resetTimer() {
 	if h.timer != nil {
 		h.timer.Stop()
 	}
-	h.timer = time.AfterFunc(minFlushInterval, h.sendFlush)
+	h.timer = time.AfterFunc(h.flushInterval, h.sendFlush)
 }
 
 func (h *SpyHandler) sendFlush() {
